@@ -1,0 +1,6 @@
+{
+  "name": "Rubik 3D",
+  "description": "Game puzzle Rubik 3D interaktif dengan kontrol sentuh responsif, rotasi kamera 360 derajat, fitur acak, penyelesaian otomatis, dan panduan pemula.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

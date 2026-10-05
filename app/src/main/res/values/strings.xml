@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Rubik 3D</string>
+    <string name="tab_play">Main</string>
+    <string name="tab_guide">Panduan Pemula</string>
+    <string name="tab_records">Rekor &amp; Riwayat</string>
+    <string name="action_scramble">Acak</string>
+    <string name="action_instant_solve">Selesai Instan</string>
+    <string name="action_hint">Bantuan</string>
+    <string name="action_reset">Reset</string>
+    <string name="action_undo">Urung</string>
+    <string name="action_camera_reset">Reset Kamera</string>
+    <string name="camera_mode_orbit">Mode Kamera Bebas</string>
+    <string name="camera_mode_swipe_cube">Mode Usap Lapisan</string>
+    <string name="guide_banner_desc">Ilustrasi panduan bermain Rubik 3D</string>
+</resources>
