@@ -20,6 +20,15 @@ data class SolveRecord(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "saved_positions")
+data class SavedCubePosition(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val name: String,
+    val moveSequence: String,
+    val movesCount: Int,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 @Dao
 interface SolveDao {
     @Query("SELECT * FROM solve_records ORDER BY timestamp DESC")
@@ -36,9 +45,22 @@ interface SolveDao {
 
     @Query("DELETE FROM solve_records")
     suspend fun clearAllRecords()
+
+    @Query("SELECT * FROM saved_positions ORDER BY timestamp DESC")
+    fun getAllSavedPositions(): Flow<List<SavedCubePosition>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSavedPosition(position: SavedCubePosition)
+
+    @Query("DELETE FROM saved_positions WHERE id = :id")
+    suspend fun deleteSavedPositionById(id: Int)
 }
 
-@Database(entities = [SolveRecord::class], version = 1, exportSchema = false)
+@Database(
+    entities = [SolveRecord::class, SavedCubePosition::class],
+    version = 2,
+    exportSchema = false
+)
 abstract class RubikDatabase : RoomDatabase() {
     abstract fun solveDao(): SolveDao
 }
@@ -46,8 +68,15 @@ abstract class RubikDatabase : RoomDatabase() {
 class SolveRepository(private val solveDao: SolveDao) {
     val allRecords: Flow<List<SolveRecord>> = solveDao.getAllRecords()
     val bestRecord: Flow<SolveRecord?> = solveDao.getBestRecord()
+    val allSavedPositions: Flow<List<SavedCubePosition>> = solveDao.getAllSavedPositions()
 
     suspend fun insert(record: SolveRecord) = solveDao.insertRecord(record)
     suspend fun deleteById(id: Int) = solveDao.deleteRecordById(id)
     suspend fun clearAll() = solveDao.clearAllRecords()
+
+    suspend fun insertSavedPosition(position: SavedCubePosition) =
+        solveDao.insertSavedPosition(position)
+
+    suspend fun deleteSavedPositionById(id: Int) =
+        solveDao.deleteSavedPositionById(id)
 }

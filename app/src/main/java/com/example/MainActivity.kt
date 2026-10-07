@@ -26,7 +26,6 @@ import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.ViewInAr
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -34,6 +33,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -46,6 +48,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.room.Room
 import com.example.data.RubikDatabase
+import com.example.data.SavedCubePosition
 import com.example.data.SolveRepository
 import com.example.model.CubeMove
 import com.example.ui.components.BeginnerGuideScreen
@@ -54,6 +57,7 @@ import com.example.ui.components.InteractiveGuideBanner
 import com.example.ui.components.QuickControlPad
 import com.example.ui.components.RecordsAndHistoryScreen
 import com.example.ui.components.Rubik3DViewport
+import com.example.ui.components.SaveLoadPositionDialog
 import com.example.ui.components.TopHudBar
 import com.example.ui.theme.CyanPrimary
 import com.example.ui.theme.MyApplicationTheme
@@ -73,7 +77,7 @@ class MainActivity : ComponentActivity() {
             applicationContext,
             RubikDatabase::class.java,
             "rubik_3d_database"
-        ).fallbackToDestructiveMigration(false).build()
+        ).fallbackToDestructiveMigration(true).build()
     }
 
     private val repository by lazy {
@@ -99,6 +103,7 @@ fun RubikAppContent(viewModel: RubikViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val allRecords by viewModel.allRecords.collectAsStateWithLifecycle()
     val bestRecord by viewModel.bestRecord.collectAsStateWithLifecycle()
+    val savedPositions by viewModel.savedPositions.collectAsStateWithLifecycle()
 
     // BackHandler for secondary tabs as required by navigation guidelines
     BackHandler(enabled = uiState.selectedTab != AppTab.PLAY) {
@@ -215,6 +220,7 @@ fun RubikAppContent(viewModel: RubikViewModel) {
                 AppTab.PLAY -> {
                     PlayRubikScreen(
                         uiState = uiState,
+                        savedPositions = savedPositions,
                         viewModel = viewModel
                     )
                 }
@@ -253,8 +259,11 @@ fun RubikAppContent(viewModel: RubikViewModel) {
 @Composable
 private fun PlayRubikScreen(
     uiState: RubikUiState,
+    savedPositions: List<SavedCubePosition>,
     viewModel: RubikViewModel
 ) {
+    var showSaveLoadDialog by remember { mutableStateOf(false) }
+
     val isBusy = uiState.gameStatus == GameStatus.SCRAMBLING ||
         uiState.gameStatus == GameStatus.AUTO_SOLVING ||
         uiState.activeMove != null
@@ -270,6 +279,24 @@ private fun PlayRubikScreen(
         if (move != null) {
             viewModel.performPlayerMove(move)
         }
+    }
+
+    if (showSaveLoadDialog) {
+        SaveLoadPositionDialog(
+            currentMoveSequence = uiState.currentMoveSequenceNotation,
+            currentMovesCount = uiState.moveHistory.size,
+            savedPositions = savedPositions,
+            onSaveCurrent = { customName ->
+                viewModel.saveCurrentPosition(customName)
+            },
+            onLoadPosition = { position, animateReplay ->
+                viewModel.loadSavedPosition(position, animateReplay)
+            },
+            onDeletePosition = { id ->
+                viewModel.deleteSavedPosition(id)
+            },
+            onDismiss = { showSaveLoadDialog = false }
+        )
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -348,13 +375,16 @@ private fun PlayRubikScreen(
                         canUndo = uiState.moveHistory.isNotEmpty(),
                         nextHintMove = uiState.nextHintMove,
                         scrambleDifficulty = uiState.scrambleDifficulty,
+                        gameStatus = uiState.gameStatus,
                         isBusy = isBusy,
+                        savedPositionsCount = savedPositions.size,
                         onTogglePrimeMode = { viewModel.togglePrimeMode() },
                         onExecuteNotation = executeNotation,
                         onUndo = { viewModel.undoLastMove() },
                         onScramble = { viewModel.scrambleCube() },
                         onCycleDifficulty = cycleDifficulty,
-                        onInstantSolve = { viewModel.instantSolveCube() }
+                        onInstantSolve = { viewModel.instantSolveCube() },
+                        onOpenSaveLoadDialog = { showSaveLoadDialog = true }
                     )
                 }
             }
@@ -426,13 +456,16 @@ private fun PlayRubikScreen(
                     canUndo = uiState.moveHistory.isNotEmpty(),
                     nextHintMove = uiState.nextHintMove,
                     scrambleDifficulty = uiState.scrambleDifficulty,
+                    gameStatus = uiState.gameStatus,
                     isBusy = isBusy,
+                    savedPositionsCount = savedPositions.size,
                     onTogglePrimeMode = { viewModel.togglePrimeMode() },
                     onExecuteNotation = executeNotation,
                     onUndo = { viewModel.undoLastMove() },
                     onScramble = { viewModel.scrambleCube() },
                     onCycleDifficulty = cycleDifficulty,
-                    onInstantSolve = { viewModel.instantSolveCube() }
+                    onInstantSolve = { viewModel.instantSolveCube() },
+                    onOpenSaveLoadDialog = { showSaveLoadDialog = true }
                 )
             }
         }

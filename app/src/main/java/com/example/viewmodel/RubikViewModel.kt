@@ -4,6 +4,7 @@ import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.data.SavedCubePosition
 import com.example.data.SolveRecord
 import com.example.data.SolveRepository
 import com.example.model.Axis
@@ -47,7 +48,7 @@ enum class GameStatus {
     SCRAMBLING,     // Sedang mengacak
     READY_TO_PLAY,  // Sudah diacak, waktu mulai saat langkah pertama
     PLAYING,        // Sedang bermain (timer berjalan)
-    AUTO_SOLVING,   // Sedang menyelesaikan otomatis
+    AUTO_SOLVING,   // Sedang menyelesaikan otomatis (tekan sekali lagi untuk skip instan)
     SOLVED          // Berhasil diselesaikan!
 }
 
@@ -96,6 +97,9 @@ data class RubikUiState(
 
     val nextHintMove: CubeMove?
         get() = practiceAlgorithm?.currentMove ?: solutionSteps.firstOrNull()
+
+    val currentMoveSequenceNotation: String
+        get() = if (moveHistory.isEmpty()) "" else moveHistory.joinToString(" ") { it.notation }
 }
 
 class RubikViewModel(
@@ -110,6 +114,9 @@ class RubikViewModel(
 
     val bestRecord: StateFlow<SolveRecord?> = repository.bestRecord
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val savedPositions: StateFlow<List<SavedCubePosition>> = repository.allSavedPositions
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private var animationJob: Job? = null
     private var timerJob: Job? = null
@@ -289,7 +296,7 @@ class RubikViewModel(
     }
 
     /**
-     * Scrambles the cube with animated 3D moves.
+     * Scrambles the cube starting directly from its CURRENT position (preserving & extending moveHistory).
      */
     fun scrambleCube() {
         val current = _uiState.value
@@ -299,28 +306,33 @@ class RubikViewModel(
         stopTimer()
 
         val count = current.scrambleDifficulty.moveCount
-        val scrambleSequence = generateScrambleMoves(count)
+        val lastExistingMove = current.moveHistory.lastOrNull()
+        val scrambleSequence = generateScrambleMoves(
+            count = count,
+            initialLastAxis = lastExistingMove?.axis,
+            initialLastLayer = lastExistingMove?.layer
+        )
 
         animationJob = viewModelScope.launch {
-            // Start from clean solved cube so moveHistory accurately reflects the scramble
+            // Scramble directly from the current cubeState & moveHistory
             _uiState.update {
                 it.copy(
-                    cubeState = RubikCubeState.createSolved(),
-                    moveHistory = emptyList(),
+                    activeMove = null,
+                    activeMoveProgress = 0f,
                     redoStack = emptyList(),
                     playerMovesCount = 0,
                     elapsedMillis = 0L,
                     practiceAlgorithm = null,
                     usedAssistInCurrentRun = false,
                     gameStatus = GameStatus.SCRAMBLING,
-                    statusBannerMessage = "Mengacak Rubik ($count langkah)..."
+                    statusBannerMessage = "Mengacak dari posisi sekarang ($count langkah)..."
                 )
             }
 
             for ((index, move) in scrambleSequence.withIndex()) {
                 if (!isActive) break
                 _uiState.update {
-                    it.copy(statusBannerMessage = "Mengacak Rubik (${index + 1}/$count): ${move.notation}")
+                    it.copy(statusBannerMessage = "Mengacak (${index + 1}/$count): ${move.notation}")
                 }
                 animateSingleMove(move, durationMs = 65L)
                 _uiState.update { state ->
@@ -336,18 +348,39 @@ class RubikViewModel(
             _uiState.update {
                 it.copy(
                     gameStatus = GameStatus.READY_TO_PLAY,
-                    statusBannerMessage = "Rubik siap! Gerakkan sisi mana saja untuk memulai waktu."
+                    statusBannerMessage = "Rubik selesai diacak dari posisi terakhir! Gerakkan sisi untuk mulai waktu."
                 )
             }
         }
     }
 
     /**
-     * Solves the cube automatically & swiftly in 3D, reversing all remaining moves smoothly.
+     * Solves the cube automatically with animated steps.
+     * If pressed a second time while [GameStatus.AUTO_SOLVING] is already in progress,
+     * immediately skips the remaining animation and snaps straight to the solved state!
      */
     fun instantSolveCube() {
         val current = _uiState.value
-        if (current.gameStatus == GameStatus.SCRAMBLING || current.gameStatus == GameStatus.AUTO_SOLVING) return
+        if (current.gameStatus == GameStatus.SCRAMBLING) return
+
+        // Second press during AUTO_SOLVING -> Immediately skip animation and finish instantly!
+        if (current.gameStatus == GameStatus.AUTO_SOLVING) {
+            animationJob?.cancel()
+            stopTimer()
+            _uiState.update {
+                it.copy(
+                    cubeState = RubikCubeState.createSolved(),
+                    moveHistory = emptyList(),
+                    redoStack = emptyList(),
+                    activeMove = null,
+                    activeMoveProgress = 0f,
+                    practiceAlgorithm = null,
+                    gameStatus = GameStatus.IDLE,
+                    statusBannerMessage = "Selesai Instan! Proses animasi dilewati."
+                )
+            }
+            return
+        }
 
         animationJob?.cancel()
         stopTimer()
@@ -375,16 +408,16 @@ class RubikViewModel(
                     gameStatus = GameStatus.AUTO_SOLVING,
                     usedAssistInCurrentRun = true,
                     practiceAlgorithm = null,
-                    statusBannerMessage = "Menyelesaikan secara instan (${solution.size} langkah)..."
+                    statusBannerMessage = "Menyelesaikan (${solution.size} langkah)... Tekan 'Skip Instan' untuk langsung selesai."
                 )
             }
 
-            val stepDuration = if (solution.size > 20) 45L else 70L
+            val stepDuration = if (solution.size > 20) 55L else 75L
             for ((idx, move) in solution.withIndex()) {
                 if (!isActive) break
                 _uiState.update {
                     it.copy(
-                        statusBannerMessage = "Menyelesaikan (${idx + 1}/${solution.size}): ${move.notation} — ${move.indonesianDescription}"
+                        statusBannerMessage = "Menyelesaikan (${idx + 1}/${solution.size}): ${move.notation} (Tekan tombol lagi untuk Skip)"
                     )
                 }
                 animateSingleMove(move, durationMs = stepDuration)
@@ -409,6 +442,121 @@ class RubikViewModel(
                     statusBannerMessage = "Selesai Instan berhasil! Seluruh 6 sisi telah tersusun sempurna."
                 )
             }
+        }
+    }
+
+    /**
+     * Saves the current cube position (specifically the move sequence to reach this position) into Room DB.
+     */
+    fun saveCurrentPosition(customName: String) {
+        val current = _uiState.value
+        val sequenceStr = current.currentMoveSequenceNotation
+        val count = current.moveHistory.size
+        val defaultName = if (customName.isBlank()) {
+            if (count == 0) "Posisi Solved (Awal)" else "Posisi Tersimpan ($count langkah)"
+        } else {
+            customName.trim()
+        }
+
+        viewModelScope.launch {
+            repository.insertSavedPosition(
+                SavedCubePosition(
+                    name = defaultName,
+                    moveSequence = sequenceStr,
+                    movesCount = count
+                )
+            )
+            _uiState.update {
+                it.copy(
+                    statusBannerMessage = "Posisi '$defaultName' ($count langkah) berhasil disimpan!"
+                )
+            }
+        }
+    }
+
+    /**
+     * Loads a previously saved cube position by reconstructing its move sequence.
+     * Supports either instant loading or animated step-by-step replay of the saved sequence!
+     */
+    fun loadSavedPosition(saved: SavedCubePosition, animateReplay: Boolean = false) {
+        val current = _uiState.value
+        if (current.gameStatus == GameStatus.SCRAMBLING || current.gameStatus == GameStatus.AUTO_SOLVING) return
+
+        animationJob?.cancel()
+        stopTimer()
+
+        val moves = CubeMove.parseAlgorithm(saved.moveSequence)
+
+        if (!animateReplay || moves.isEmpty()) {
+            var targetCube = RubikCubeState.createSolved()
+            for (move in moves) {
+                targetCube = targetCube.applyMove(move)
+            }
+            val simplified = RubikCubeState.simplifyMoves(moves)
+            _uiState.update {
+                it.copy(
+                    cubeState = targetCube,
+                    activeMove = null,
+                    activeMoveProgress = 0f,
+                    moveHistory = simplified,
+                    redoStack = emptyList(),
+                    playerMovesCount = 0,
+                    elapsedMillis = 0L,
+                    practiceAlgorithm = null,
+                    usedAssistInCurrentRun = false,
+                    gameStatus = if (targetCube.isSolved()) GameStatus.IDLE else GameStatus.READY_TO_PLAY,
+                    statusBannerMessage = "Posisi '${saved.name}' (${simplified.size} langkah) berhasil dimuat!"
+                )
+            }
+        } else {
+            animationJob = viewModelScope.launch {
+                _uiState.update {
+                    it.copy(
+                        cubeState = RubikCubeState.createSolved(),
+                        activeMove = null,
+                        activeMoveProgress = 0f,
+                        moveHistory = emptyList(),
+                        redoStack = emptyList(),
+                        playerMovesCount = 0,
+                        elapsedMillis = 0L,
+                        practiceAlgorithm = null,
+                        usedAssistInCurrentRun = false,
+                        gameStatus = GameStatus.SCRAMBLING,
+                        statusBannerMessage = "Memutar urutan posisi '${saved.name}' (${moves.size} langkah)..."
+                    )
+                }
+
+                for ((idx, move) in moves.withIndex()) {
+                    if (!isActive) break
+                    _uiState.update {
+                        it.copy(
+                            statusBannerMessage = "Memuat '${saved.name}' (${idx + 1}/${moves.size}): ${move.notation}"
+                        )
+                    }
+                    animateSingleMove(move, durationMs = 65L)
+                    _uiState.update { state ->
+                        state.copy(
+                            cubeState = state.cubeState.applyMove(move),
+                            activeMove = null,
+                            activeMoveProgress = 0f,
+                            moveHistory = RubikCubeState.simplifyMoves(state.moveHistory + move)
+                        )
+                    }
+                }
+
+                _uiState.update { state ->
+                    state.copy(
+                        gameStatus = if (state.cubeState.isSolved()) GameStatus.IDLE else GameStatus.READY_TO_PLAY,
+                        statusBannerMessage = "Posisi '${saved.name}' selesai dimuat!"
+                    )
+                }
+            }
+        }
+    }
+
+    fun deleteSavedPosition(id: Int) {
+        viewModelScope.launch {
+            repository.deleteSavedPositionById(id)
         }
     }
 
@@ -493,11 +641,15 @@ class RubikViewModel(
         }
     }
 
-    private fun generateScrambleMoves(count: Int): List<CubeMove> {
+    private fun generateScrambleMoves(
+        count: Int,
+        initialLastAxis: Axis? = null,
+        initialLastLayer: Int? = null
+    ): List<CubeMove> {
         val allMoves = CubeMove.ALL_OUTER_MOVES
         val result = mutableListOf<CubeMove>()
-        var lastAxis: Axis? = null
-        var lastLayer: Int? = null
+        var lastAxis: Axis? = initialLastAxis
+        var lastLayer: Int? = initialLastLayer
 
         repeat(count) {
             val candidates = allMoves.filter { move ->

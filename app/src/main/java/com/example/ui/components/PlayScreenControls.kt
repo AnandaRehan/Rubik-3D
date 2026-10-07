@@ -13,9 +13,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,10 +27,13 @@ import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Cameraswitch
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.PlayArrow
@@ -48,9 +54,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,11 +71,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import com.example.data.SavedCubePosition
 import com.example.model.CubeColor
 import com.example.model.CubeMove
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanPrimary
 import com.example.ui.theme.EmeraldSuccess
+import com.example.ui.theme.IndigoAccent
+import com.example.ui.theme.RoseDanger
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.viewmodel.ActivePracticeAlgorithm
@@ -72,6 +87,8 @@ import com.example.viewmodel.CameraPreset
 import com.example.viewmodel.ControlMode
 import com.example.viewmodel.GameStatus
 import com.example.viewmodel.ScrambleDifficulty
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 @Composable
@@ -156,7 +173,7 @@ fun TopHudBar(
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "$remainingSolutionSteps langkah ke selesai",
+                            text = "$remainingSolutionSteps ke selesai",
                             style = MaterialTheme.typography.labelSmall,
                             color = AmberWarning,
                             fontWeight = FontWeight.SemiBold
@@ -528,15 +545,21 @@ fun QuickControlPad(
     canUndo: Boolean,
     nextHintMove: CubeMove?,
     scrambleDifficulty: ScrambleDifficulty,
+    gameStatus: GameStatus,
     isBusy: Boolean,
+    savedPositionsCount: Int,
     onTogglePrimeMode: () -> Unit,
     onExecuteNotation: (String) -> Unit,
     onUndo: () -> Unit,
     onScramble: () -> Unit,
     onCycleDifficulty: () -> Unit,
     onInstantSolve: () -> Unit,
+    onOpenSaveLoadDialog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isAutoSolving = gameStatus == GameStatus.AUTO_SOLVING
+    val isScrambling = gameStatus == GameStatus.SCRAMBLING
+
     Surface(
         color = Slate900.copy(alpha = 0.96f),
         shape = RoundedCornerShape(20.dp),
@@ -549,9 +572,9 @@ fun QuickControlPad(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Header row: Direction toggle (Clockwise vs Counter-Clockwise Prime) + Undo
+            // Header row: Direction toggle + Save/Load Position button + Undo
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -559,15 +582,8 @@ fun QuickControlPad(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = "Kontrol Putar Cepat:",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
                     Surface(
                         color = if (isPrimeMode) AmberWarning.copy(alpha = 0.2f) else CyanPrimary.copy(alpha = 0.18f),
                         shape = RoundedCornerShape(10.dp),
@@ -582,7 +598,7 @@ fun QuickControlPad(
                             .testTag("toggle_prime_direction_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
@@ -594,13 +610,47 @@ fun QuickControlPad(
                                 },
                                 contentDescription = null,
                                 tint = if (isPrimeMode) AmberWarning else CyanPrimary,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                             Text(
-                                text = if (isPrimeMode) "Arah: Berlawanan (')" else "Arah: Searah Jarum Jam",
+                                text = if (isPrimeMode) "Arah: Balik (')" else "Arah: Searah",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isPrimeMode) AmberWarning else CyanPrimary
+                            )
+                        }
+                    }
+
+                    // Simpan / Muat Posisi Button
+                    Surface(
+                        color = IndigoAccent.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(enabled = !isBusy) { onOpenSaveLoadDialog() }
+                            .border(1.dp, IndigoAccent.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                            .testTag("open_save_load_positions_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Bookmarks,
+                                contentDescription = "Simpan dan Muat Posisi",
+                                tint = IndigoAccent,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = if (savedPositionsCount > 0) {
+                                    "Simpan/Muat ($savedPositionsCount)"
+                                } else {
+                                    "Simpan Posisi"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFE0E7FF)
                             )
                         }
                     }
@@ -611,16 +661,16 @@ fun QuickControlPad(
                     enabled = canUndo && !isBusy,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     modifier = Modifier
-                        .height(34.dp)
+                        .height(32.dp)
                         .testTag("undo_move_button")
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Undo,
                         contentDescription = "Urung",
-                        modifier = Modifier.size(15.dp)
+                        modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Urung", fontSize = 12.sp)
+                    Text("Urung", fontSize = 11.sp)
                 }
             }
 
@@ -637,7 +687,7 @@ fun QuickControlPad(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(52.dp)
+                            .height(50.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .clickable(enabled = !isBusy) { onExecuteNotation(notation) }
                             .border(
@@ -679,7 +729,7 @@ fun QuickControlPad(
                 }
             }
 
-            // Primary Action Row: Scramble (with Difficulty) + Instant Solve
+            // Primary Action Row: Scramble (from current position) + Instant Solve (with 2nd tap instant skip!)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -742,13 +792,13 @@ fun QuickControlPad(
                     )
                 }
 
-                // Instant Solve Button ("Selesai Instan")
+                // Instant Solve Button ("Selesai Instan" -> becomes "Skip Instan!" while AUTO_SOLVING)
                 Button(
                     onClick = onInstantSolve,
-                    enabled = !isBusy,
+                    enabled = !isScrambling,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = EmeraldSuccess,
-                        contentColor = Color(0xFF064E3B)
+                        containerColor = if (isAutoSolving) AmberWarning else EmeraldSuccess,
+                        contentColor = if (isAutoSolving) Color(0xFF090D16) else Color(0xFF064E3B)
                     ),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
@@ -757,16 +807,289 @@ fun QuickControlPad(
                         .testTag("instant_solve_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.AutoFixHigh,
+                        imageVector = if (isAutoSolving) Icons.Default.FastForward else Icons.Default.AutoFixHigh,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Selesai Instan",
+                        text = if (isAutoSolving) "Skip Instan!" else "Selesai Instan",
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SaveLoadPositionDialog(
+    currentMoveSequence: String,
+    currentMovesCount: Int,
+    savedPositions: List<SavedCubePosition>,
+    onSaveCurrent: (String) -> Unit,
+    onLoadPosition: (SavedCubePosition, Boolean) -> Unit,
+    onDeletePosition: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var positionName by remember { mutableStateOf("") }
+    val dateFormat = remember { SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            color = Slate900,
+            shape = RoundedCornerShape(22.dp),
+            tonalElevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(22.dp))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bookmarks,
+                            contentDescription = null,
+                            tint = CyanPrimary
+                        )
+                        Text(
+                            text = "Simpan & Muat Posisi Rubik",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .testTag("close_save_load_dialog_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Tutup",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Current Position Save Card
+                Surface(
+                    color = Slate800,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Posisi Saat Ini ($currentMovesCount langkah dari awal):",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = CyanPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (currentMoveSequence.isEmpty()) {
+                                "Posisi awal (Solved - belum ada urutan langkah)"
+                            } else {
+                                "Urutan: $currentMoveSequence"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+
+                        OutlinedTextField(
+                            value = positionName,
+                            onValueChange = { positionName = it },
+                            placeholder = {
+                                Text(
+                                    text = "Nama posisi (opsional, misal: Latihan Cross)",
+                                    fontSize = 12.sp
+                                )
+                            },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("save_position_name_input")
+                        )
+
+                        Button(
+                            onClick = {
+                                onSaveCurrent(positionName)
+                                positionName = ""
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = CyanPrimary,
+                                contentColor = Color(0xFF090D16)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("confirm_save_position_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.BookmarkAdd,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Simpan Urutan Posisi Ini", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // Saved Positions List
+                Text(
+                    text = "Daftar Posisi Tersimpan (${savedPositions.size})",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                if (savedPositions.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 18.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Belum ada posisi yang disimpan.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 260.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(savedPositions, key = { it.id }) { item ->
+                            Surface(
+                                color = Slate800,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = item.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                text = "${item.movesCount} langkah • ${dateFormat.format(Date(item.timestamp))}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = CyanPrimary,
+                                                fontSize = 10.sp
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { onDeletePosition(item.id) },
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .testTag("delete_saved_position_${item.id}_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Hapus Posisi",
+                                                tint = RoseDanger,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Text(
+                                        text = if (item.moveSequence.isEmpty()) {
+                                            "Urutan: (Posisi Solved Awal)"
+                                        } else {
+                                            "Urutan: ${item.moveSequence}"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 11.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = {
+                                                onLoadPosition(item, false)
+                                                onDismiss()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = EmeraldSuccess,
+                                                contentColor = Color(0xFF064E3B)
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(34.dp)
+                                                .testTag("load_instant_position_${item.id}_button")
+                                        ) {
+                                            Text("Muat Langsung", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        FilledTonalButton(
+                                            onClick = {
+                                                onLoadPosition(item, true)
+                                                onDismiss()
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(34.dp)
+                                                .testTag("load_animated_position_${item.id}_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.PlayArrow,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text("Animasi Urutan", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
